@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export type TileSize = "1x1" | "2x1" | "1x2" | "2x2";
 
@@ -11,53 +11,101 @@ export interface TileConfig {
 }
 
 export type PanelConfig = Record<string, TileConfig>;
+export type RoomOrder = Record<string, number>;
 
-export function usePanelConfig() {
+export function usePanelConfig(householdId?: string) {
+  const tileKey = householdId ? `panel_config_v3_${householdId}` : "panel_config_v3";
+  const roomKey = householdId ? `room_order_v1_${householdId}` : "room_order_v1";
+
   const [config, setConfigState] = useState<PanelConfig>({});
+  const [roomOrder, setRoomOrderState] = useState<RoomOrder>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const saved = localStorage.getItem("panel_config_v3");
-    if (saved) {
-      try {
-        setConfigState(JSON.parse(saved));
-      } catch (e) {
-        console.error(e);
-      }
+    try {
+      const saved = localStorage.getItem(tileKey);
+      if (saved) setConfigState(JSON.parse(saved));
+      const savedRooms = localStorage.getItem(roomKey);
+      if (savedRooms) setRoomOrderState(JSON.parse(savedRooms));
+    } catch {
+      // ignore parse errors
     }
     setIsLoaded(true);
-  }, []);
+  }, [tileKey, roomKey]);
 
-  const setConfig = (newConfig: PanelConfig | ((prev: PanelConfig) => PanelConfig)) => {
-    setConfigState((prev) => {
-      const updated = typeof newConfig === "function" ? newConfig(prev) : newConfig;
-      localStorage.setItem("panel_config_v3", JSON.stringify(updated));
-      return updated;
-    });
-  };
+  const setConfig = useCallback(
+    (newConfig: PanelConfig | ((prev: PanelConfig) => PanelConfig)) => {
+      setConfigState((prev) => {
+        const updated = typeof newConfig === "function" ? newConfig(prev) : newConfig;
+        localStorage.setItem(tileKey, JSON.stringify(updated));
+        return updated;
+      });
+    },
+    [tileKey]
+  );
 
-  const initDeviceConfig = (deviceId: string) => {
-    setConfig((prev) => {
-      if (prev[deviceId]) return prev;
-      return {
+  const initDeviceConfig = useCallback(
+    (deviceId: string) => {
+      setConfig((prev) => {
+        if (prev[deviceId]) return prev;
+        return {
+          ...prev,
+          [deviceId]: {
+            id: deviceId,
+            size: "1x1",
+            pinned: false,
+            order: Object.keys(prev).length,
+            hidden: false,
+          },
+        };
+      });
+    },
+    [setConfig]
+  );
+
+  const updateTileConfig = useCallback(
+    (deviceId: string, updates: Partial<TileConfig>) => {
+      setConfig((prev) => ({
         ...prev,
         [deviceId]: {
-          id: deviceId,
-          size: "1x1",
-          pinned: false,
-          order: Object.keys(prev).length,
-          hidden: false,
-        }
-      };
-    });
-  };
+          ...(prev[deviceId] ?? {
+            id: deviceId,
+            size: "1x1",
+            pinned: false,
+            order: 0,
+            hidden: false,
+          }),
+          ...updates,
+        },
+      }));
+    },
+    [setConfig]
+  );
 
-  const updateTileConfig = (deviceId: string, updates: Partial<TileConfig>) => {
-    setConfig((prev) => ({
-      ...prev,
-      [deviceId]: { ...prev[deviceId], ...updates }
-    }));
-  };
+  const swapRoomOrder = useCallback(
+    (roomIdA: string, roomIdB: string, allRoomIds: string[]) => {
+      setRoomOrderState((prev) => {
+        const getOrder = (id: string) =>
+          prev[id] !== undefined ? prev[id] : allRoomIds.indexOf(id);
+        const newOrder: RoomOrder = {
+          ...prev,
+          [roomIdA]: getOrder(roomIdB),
+          [roomIdB]: getOrder(roomIdA),
+        };
+        localStorage.setItem(roomKey, JSON.stringify(newOrder));
+        return newOrder;
+      });
+    },
+    [roomKey]
+  );
 
-  return { config, setConfig, initDeviceConfig, updateTileConfig, isLoaded };
+  return {
+    config,
+    setConfig,
+    initDeviceConfig,
+    updateTileConfig,
+    roomOrder,
+    swapRoomOrder,
+    isLoaded,
+  };
 }
