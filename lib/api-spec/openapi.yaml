@@ -1,22 +1,25 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Yandex Smart Home proxy API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: yandex
+    description: Yandex Smart Home proxy
+  - name: weather
+    description: Weather proxy
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +27,147 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /yandex/user-info:
+    get:
+      operationId: getUserInfo
+      tags: [yandex]
+      summary: Get all user households, rooms, and devices
+      parameters:
+        - name: x-yandex-token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User info with households, rooms, devices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/YandexUserInfo"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /yandex/devices/{deviceId}/actions:
+    post:
+      operationId: controlDevice
+      tags: [yandex]
+      summary: Send action to a device
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: x-yandex-token
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceActionInput"
+      responses:
+        "200":
+          description: Action result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceActionResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /yandex/scenarios:
+    get:
+      operationId: getScenarios
+      tags: [yandex]
+      summary: Get list of smart home scenarios
+      parameters:
+        - name: x-yandex-token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of scenarios
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenariosResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /yandex/scenarios/{scenarioId}/actions:
+    post:
+      operationId: runScenario
+      tags: [yandex]
+      summary: Run a smart home scenario
+      parameters:
+        - name: scenarioId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: x-yandex-token
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scenario run result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScenarioActionResult"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /weather:
+    get:
+      operationId: getWeather
+      tags: [weather]
+      summary: Get current weather data from Open-Meteo
+      parameters:
+        - name: latitude
+          in: query
+          required: false
+          schema:
+            type: number
+        - name: longitude
+          in: query
+          required: false
+          schema:
+            type: number
+      responses:
+        "200":
+          description: Weather data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherData"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +178,263 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    DeviceProperty:
+      type: object
+      properties:
+        type:
+          type: string
+        retrievable:
+          type: boolean
+        reportable:
+          type: boolean
+        parameters:
+          type: object
+        state:
+          type: object
+      required:
+        - type
+
+    DeviceCapability:
+      type: object
+      properties:
+        type:
+          type: string
+        retrievable:
+          type: boolean
+        reportable:
+          type: boolean
+        parameters:
+          type: object
+        state:
+          type: object
+      required:
+        - type
+
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        type:
+          type: string
+        external_id:
+          type: string
+        skill_id:
+          type: string
+        room_id:
+          type: ["string", "null"]
+        groups:
+          type: array
+          items:
+            type: string
+        capabilities:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceCapability"
+        properties:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceProperty"
+        household_id:
+          type: ["string", "null"]
+        quasar_info:
+          type: object
+      required:
+        - id
+        - name
+        - type
+
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        household_id:
+          type: string
+        devices:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - name
+        - household_id
+
+    Household:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required:
+        - id
+        - name
+
+    YandexUserInfo:
+      type: object
+      properties:
+        status:
+          type: string
+        request_id:
+          type: string
+        rooms:
+          type: array
+          items:
+            $ref: "#/components/schemas/Room"
+        groups:
+          type: array
+          items:
+            type: object
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/Device"
+        scenarios:
+          type: array
+          items:
+            type: object
+        households:
+          type: array
+          items:
+            $ref: "#/components/schemas/Household"
+      required:
+        - status
+
+    DeviceActionCapability:
+      type: object
+      properties:
+        type:
+          type: string
+        state:
+          type: object
+      required:
+        - type
+        - state
+
+    DeviceActionInput:
+      type: object
+      properties:
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceActionCapability"
+      required:
+        - actions
+
+    DeviceActionResult:
+      type: object
+      properties:
+        status:
+          type: string
+        request_id:
+          type: string
+        devices:
+          type: array
+          items:
+            type: object
+      required:
+        - status
+
+    Scenario:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        is_active:
+          type: boolean
+        triggers:
+          type: array
+          items:
+            type: object
+        steps:
+          type: array
+          items:
+            type: object
+      required:
+        - id
+        - name
+
+    ScenariosResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        request_id:
+          type: string
+        scenarios:
+          type: array
+          items:
+            $ref: "#/components/schemas/Scenario"
+      required:
+        - status
+
+    ScenarioActionResult:
+      type: object
+      properties:
+        status:
+          type: string
+        request_id:
+          type: string
+      required:
+        - status
+
+    WeatherData:
+      type: object
+      properties:
+        current:
+          type: object
+          properties:
+            temperature_2m:
+              type: number
+            relative_humidity_2m:
+              type: number
+            weather_code:
+              type: number
+            wind_speed_10m:
+              type: number
+            precipitation_probability:
+              type: ["number", "null"]
+          required:
+            - temperature_2m
+            - relative_humidity_2m
+            - weather_code
+        hourly:
+          type: object
+          properties:
+            precipitation_probability:
+              type: array
+              items:
+                type: number
+            time:
+              type: array
+              items:
+                type: string
+        city:
+          type: ["string", "null"]
+        latitude:
+          type: number
+        longitude:
+          type: number
+      required:
+        - current
+        - latitude
+        - longitude
