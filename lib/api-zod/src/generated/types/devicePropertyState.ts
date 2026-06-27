@@ -6,4 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DevicePropertyState = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DevicePropertyState = { [key: string]: unknown } | null;

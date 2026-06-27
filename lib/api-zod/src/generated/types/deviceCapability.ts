@@ -12,6 +12,8 @@ export interface DeviceCapability {
   type: string;
   retrievable?: boolean;
   reportable?: boolean;
+  /** @nullable */
   parameters?: DeviceCapabilityParameters;
+  /** @nullable */
   state?: DeviceCapabilityState;
 }

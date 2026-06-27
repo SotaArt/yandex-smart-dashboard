@@ -196,9 +196,9 @@ components:
         reportable:
           type: boolean
         parameters:
-          type: object
+          type: ["object", "null"]
         state:
-          type: object
+          type: ["object", "null"]
       required:
         - type
 
@@ -212,9 +212,9 @@ components:
         reportable:
           type: boolean
         parameters:
-          type: object
+          type: ["object", "null"]
         state:
-          type: object
+          type: ["object", "null"]
       required:
         - type
 

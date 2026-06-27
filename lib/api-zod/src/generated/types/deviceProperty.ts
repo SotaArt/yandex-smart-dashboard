@@ -12,6 +12,8 @@ export interface DeviceProperty {
   type: string;
   retrievable?: boolean;
   reportable?: boolean;
+  /** @nullable */
   parameters?: DevicePropertyParameters;
+  /** @nullable */
   state?: DevicePropertyState;
 }

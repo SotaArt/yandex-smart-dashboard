@@ -50,10 +50,10 @@ export const GetUserInfoResponse = zod.object({
   "reportable": zod.boolean().optional(),
   "parameters": zod.object({
 
-}).passthrough().optional(),
+}).passthrough().nullish(),
   "state": zod.object({
 
-}).passthrough().optional()
+}).passthrough().nullish()
 })).optional(),
   "properties": zod.array(zod.object({
   "type": zod.string(),
@@ -61,10 +61,10 @@ export const GetUserInfoResponse = zod.object({
   "reportable": zod.boolean().optional(),
   "parameters": zod.object({
 
-}).passthrough().optional(),
+}).passthrough().nullish(),
   "state": zod.object({
 
-}).passthrough().optional()
+}).passthrough().nullish()
 })).optional(),
   "household_id": zod.string().nullish(),
   "quasar_info": zod.object({

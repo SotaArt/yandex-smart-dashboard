@@ -6,4 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type DeviceCapabilityParameters = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DeviceCapabilityParameters = { [key: string]: unknown } | null;

@@ -1,0 +1,2 @@
+- [Yandex API nullable states](yandex-nullable-states.md) — Yandex IoT API sends `null` for `capabilities[].state` and `properties[].state` on offline devices; schema must allow null.
+- [Yandex non-JSON error bodies](yandex-safe-json.md) — Yandex API sometimes returns non-JSON on errors (e.g. scenarios endpoint); always use safeJson() before response.json() and check !response.ok first.

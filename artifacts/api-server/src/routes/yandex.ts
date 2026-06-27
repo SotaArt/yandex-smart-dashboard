@@ -17,8 +17,14 @@ const router: IRouter = Router();
 
 const YANDEX_API_BASE = "https://api.iot.yandex.net";
 
-interface YandexErrorResponse {
-  message?: string;
+/** Safely parse JSON — returns null if the body is not valid JSON */
+async function safeJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 router.get("/yandex/user-info", async (req, res): Promise<void> => {
@@ -39,15 +45,24 @@ router.get("/yandex/user-info", async (req, res): Promise<void> => {
       },
     });
 
-    const data = (await response.json()) as YandexErrorResponse;
+    const data = await safeJson(response);
 
     if (!response.ok) {
       req.log.warn({ status: response.status }, "Yandex API error on user-info");
-      res.status(response.status).json({ error: data?.message ?? "Yandex API error" });
+      res.status(response.status).json({
+        error: (data as any)?.message ?? `Yandex API error (${response.status})`,
+      });
       return;
     }
 
-    res.json(GetUserInfoResponse.parse(data));
+    const parsed = GetUserInfoResponse.safeParse(data);
+    if (!parsed.success) {
+      req.log.error({ err: parsed.error }, "Zod parse error on user-info");
+      res.status(502).json({ error: "Unexpected response shape from Yandex API" });
+      return;
+    }
+
+    res.json(parsed.data);
   } catch (err) {
     req.log.error({ err }, "Failed to fetch Yandex user info");
     res.status(502).json({ error: "Failed to reach Yandex API" });
@@ -93,15 +108,24 @@ router.post("/yandex/devices/:deviceId/actions", async (req, res): Promise<void>
       }
     );
 
-    const data = (await response.json()) as YandexErrorResponse;
+    const data = await safeJson(response);
 
     if (!response.ok) {
       req.log.warn({ status: response.status }, "Yandex API error on device action");
-      res.status(response.status).json({ error: data?.message ?? "Yandex API error" });
+      res.status(response.status).json({
+        error: (data as any)?.message ?? `Yandex API error (${response.status})`,
+      });
       return;
     }
 
-    res.json(ControlDeviceResponse.parse(data));
+    const parsed = ControlDeviceResponse.safeParse(data);
+    if (!parsed.success) {
+      req.log.error({ err: parsed.error }, "Zod parse error on device action");
+      res.status(502).json({ error: "Unexpected response shape from Yandex API" });
+      return;
+    }
+
+    res.json(parsed.data);
   } catch (err) {
     req.log.error({ err }, "Failed to send device action");
     res.status(502).json({ error: "Failed to reach Yandex API" });
@@ -125,15 +149,25 @@ router.get("/yandex/scenarios", async (req, res): Promise<void> => {
       },
     });
 
-    const data = (await response.json()) as YandexErrorResponse;
+    const data = await safeJson(response);
 
     if (!response.ok) {
       req.log.warn({ status: response.status }, "Yandex API error on scenarios");
-      res.status(response.status).json({ error: data?.message ?? "Yandex API error" });
+      res.status(response.status).json({
+        error: (data as any)?.message ?? `Yandex API error (${response.status})`,
+      });
       return;
     }
 
-    res.json(GetScenariosResponse.parse(data));
+    const parsed = GetScenariosResponse.safeParse(data);
+    if (!parsed.success) {
+      req.log.error({ err: parsed.error }, "Zod parse error on scenarios");
+      // Return empty scenarios list rather than 502 — scenarios are non-critical
+      res.json({ status: "ok", scenarios: [] });
+      return;
+    }
+
+    res.json(parsed.data);
   } catch (err) {
     req.log.error({ err }, "Failed to fetch Yandex scenarios");
     res.status(502).json({ error: "Failed to reach Yandex API" });
@@ -171,15 +205,24 @@ router.post("/yandex/scenarios/:scenarioId/actions", async (req, res): Promise<v
       }
     );
 
-    const data = (await response.json()) as YandexErrorResponse;
+    const data = await safeJson(response);
 
     if (!response.ok) {
       req.log.warn({ status: response.status }, "Yandex API error on scenario run");
-      res.status(response.status).json({ error: data?.message ?? "Yandex API error" });
+      res.status(response.status).json({
+        error: (data as any)?.message ?? `Yandex API error (${response.status})`,
+      });
       return;
     }
 
-    res.json(RunScenarioResponse.parse(data));
+    const parsed = RunScenarioResponse.safeParse(data);
+    if (!parsed.success) {
+      req.log.error({ err: parsed.error }, "Zod parse error on scenario run");
+      res.status(502).json({ error: "Unexpected response shape from Yandex API" });
+      return;
+    }
+
+    res.json(parsed.data);
   } catch (err) {
     req.log.error({ err }, "Failed to run Yandex scenario");
     res.status(502).json({ error: "Failed to reach Yandex API" });

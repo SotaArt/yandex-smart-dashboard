@@ -13,27 +13,43 @@ export interface ApiError {
   error: string;
 }
 
-export type DevicePropertyParameters = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DevicePropertyParameters = { [key: string]: unknown } | null;
 
-export type DevicePropertyState = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DevicePropertyState = { [key: string]: unknown } | null;
 
 export interface DeviceProperty {
   type: string;
   retrievable?: boolean;
   reportable?: boolean;
+  /** @nullable */
   parameters?: DevicePropertyParameters;
+  /** @nullable */
   state?: DevicePropertyState;
 }
 
-export type DeviceCapabilityParameters = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DeviceCapabilityParameters = { [key: string]: unknown } | null;
 
-export type DeviceCapabilityState = { [key: string]: unknown };
+/**
+ * @nullable
+ */
+export type DeviceCapabilityState = { [key: string]: unknown } | null;
 
 export interface DeviceCapability {
   type: string;
   retrievable?: boolean;
   reportable?: boolean;
+  /** @nullable */
   parameters?: DeviceCapabilityParameters;
+  /** @nullable */
   state?: DeviceCapabilityState;
 }
 
