@@ -8,15 +8,26 @@ export const DEVICE_ICONS: Record<string, string> = {
   "devices.types.sensor.climate": "📊",
   "devices.types.sensor.open": "🚪",
   "devices.types.sensor.presence": "👁️",
+  "devices.types.sensor.motion": "🏃",
+  "devices.types.sensor.smoke": "🔥",
+  "devices.types.sensor.water_leak": "🌊",
   "devices.types.humidifier": "💧",
   "devices.types.purifier": "🌬️",
   "devices.types.curtain": "🪟",
   "devices.types.vacuum_cleaner": "🤖",
-  "default": "📱"
+  "devices.types.media_device.tv": "📺",
+  "devices.types.media_device": "🎵",
+  "devices.types.cooking.kettle": "☕",
+  "devices.types.other": "📱",
+  "default": "📱",
 };
 
 export function getDeviceIcon(type: string) {
-  return DEVICE_ICONS[type] || DEVICE_ICONS["default"];
+  if (DEVICE_ICONS[type]) return DEVICE_ICONS[type];
+  for (const key of Object.keys(DEVICE_ICONS)) {
+    if (type.startsWith(key)) return DEVICE_ICONS[key];
+  }
+  return DEVICE_ICONS["default"];
 }
 
 export function getWeatherEmoji(code: number) {
@@ -27,19 +38,103 @@ export function getWeatherEmoji(code: number) {
   if (code >= 71 && code <= 77) return "❄️";
   if (code >= 80 && code <= 82) return "🌦️";
   if (code >= 95 && code <= 99) return "⛈️";
-  return "❓";
+  return "🌡️";
 }
 
-export function getDeviceCapability(device: any, type: string) {
-  return device.capabilities?.find((c: any) => c.type === type);
+export function getDeviceCapability(device: any, type: string, instance?: string) {
+  return device.capabilities?.find(
+    (c: any) => c.type === type && (instance === undefined || c.parameters?.instance === instance)
+  );
 }
 
-export function getDeviceProperty(device: any, type: string) {
-  return device.properties?.find((p: any) => p.type === type);
+export function getDeviceProperty(device: any, instance: string) {
+  return device.properties?.find((p: any) => p.parameters?.instance === instance);
 }
 
 export function isDeviceOn(device: any) {
-  const onOffCapability = getDeviceCapability(device, "devices.capabilities.on_off");
-  if (!onOffCapability) return false;
-  return onOffCapability.state?.value === true;
+  const cap = getDeviceCapability(device, "devices.capabilities.on_off");
+  if (!cap) return false;
+  return cap.state?.value === true;
+}
+
+export function hasToggle(device: any) {
+  return !!getDeviceCapability(device, "devices.capabilities.on_off");
+}
+
+export function isAcDevice(device: any) {
+  return device.type === "devices.types.thermostat.ac" || device.type === "devices.types.thermostat";
+}
+
+/** Returns all sensor-style property values present on a device, regardless of device type */
+export function getSensorReadings(device: any): {
+  temperature?: number;
+  humidity?: number;
+  pm25?: number;
+  co2?: number;
+  battery?: number;
+  motion?: boolean;
+  open?: boolean;
+  presence?: boolean;
+} {
+  const props = device.properties ?? [];
+  const get = (instance: string) =>
+    props.find((p: any) => p.parameters?.instance === instance)?.state?.value;
+
+  const result: ReturnType<typeof getSensorReadings> = {};
+  const temp = get("temperature");
+  if (temp !== undefined && temp !== null) result.temperature = Number(temp);
+  const hum = get("humidity");
+  if (hum !== undefined && hum !== null) result.humidity = Number(hum);
+  const pm = get("pm2.5_density");
+  if (pm !== undefined && pm !== null) result.pm25 = Number(pm);
+  const co2 = get("co2_level");
+  if (co2 !== undefined && co2 !== null) result.co2 = Number(co2);
+  const bat = get("battery_level");
+  if (bat !== undefined && bat !== null) result.battery = Number(bat);
+  return result;
+}
+
+export function hasSensorReadings(device: any) {
+  const r = getSensorReadings(device);
+  return Object.keys(r).length > 0;
+}
+
+export type AcMode = "auto" | "cool" | "heat" | "dry" | "fan_only";
+
+export const AC_MODE_LABELS: Record<AcMode, { emoji: string; label: string }> = {
+  auto: { emoji: "🔄", label: "Авто" },
+  cool: { emoji: "❄️", label: "Охлаждение" },
+  heat: { emoji: "🔥", label: "Тепло" },
+  dry: { emoji: "💧", label: "Осушение" },
+  fan_only: { emoji: "🌬️", label: "Вентилятор" },
+};
+
+export function getAcMode(device: any): AcMode | undefined {
+  const cap = getDeviceCapability(device, "devices.capabilities.mode", "thermostat");
+  return cap?.state?.value as AcMode | undefined;
+}
+
+export function getAcModeOptions(device: any): AcMode[] {
+  const cap = getDeviceCapability(device, "devices.capabilities.mode", "thermostat");
+  return (cap?.parameters?.modes?.map((m: any) => m.value) ?? []) as AcMode[];
+}
+
+export function getAcTemperature(device: any): { value?: number; min?: number; max?: number } {
+  const cap = getDeviceCapability(device, "devices.capabilities.range", "temperature");
+  if (!cap) return {};
+  return {
+    value: cap.state?.value as number | undefined,
+    min: cap.parameters?.min_value as number | undefined,
+    max: cap.parameters?.max_value as number | undefined,
+  };
+}
+
+export function getAcFanSpeed(device: any): { value?: number; min?: number; max?: number } {
+  const cap = getDeviceCapability(device, "devices.capabilities.range", "fan_speed");
+  if (!cap) return {};
+  return {
+    value: cap.state?.value as number | undefined,
+    min: cap.parameters?.min_value as number | undefined,
+    max: cap.parameters?.max_value as number | undefined,
+  };
 }

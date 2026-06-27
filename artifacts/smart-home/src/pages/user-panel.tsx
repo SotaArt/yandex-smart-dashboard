@@ -1,4 +1,5 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetUserInfo,
@@ -9,11 +10,22 @@ import {
 import { useYandexToken } from "@/hooks/use-yandex-token";
 import { usePanelConfig, type TileSize } from "@/hooks/use-panel-config";
 import { useSensorHistory } from "@/hooks/use-sensor-history";
-import { getDeviceIcon, isDeviceOn, getDeviceProperty, getWeatherEmoji } from "@/lib/yandex";
+import {
+  getDeviceIcon,
+  isDeviceOn,
+  hasToggle,
+  isAcDevice,
+  getSensorReadings,
+  hasSensorReadings,
+  getAcMode,
+  getDeviceCapability,
+  getWeatherEmoji,
+  AC_MODE_LABELS,
+} from "@/lib/yandex";
 import { TokenForm } from "@/components/token-form";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Edit, Pin, X, Plus, ChevronLeft, ChevronRight } from "lucide-react";
+import { Edit, Pin, X, Plus, ChevronLeft, ChevronRight, Settings, GripVertical } from "lucide-react";
 
 /* ─── Weather Card ─── */
 function WeatherCard() {
@@ -25,45 +37,35 @@ function WeatherCard() {
   const dateStr = now.toLocaleDateString("ru-RU", { weekday: "long", day: "numeric", month: "long" });
 
   if (weatherQuery.isLoading) {
-    return <Skeleton className="w-full h-28 rounded-2xl mb-4" />;
+    return <Skeleton className="w-full h-28 rounded-2xl mb-3" />;
   }
 
   const current = w?.current;
   const emoji = current ? getWeatherEmoji(current.weather_code) : "🌡️";
-  const precipProb = current?.precipitation_probability;
 
   return (
-    <div
-      className="w-full rounded-2xl p-4 mb-4 bg-card border border-border/50 flex items-center justify-between gap-4 flex-wrap"
-      data-testid="card-weather"
-    >
+    <div className="w-full rounded-2xl p-4 mb-3 bg-card border border-border/50 flex items-center justify-between gap-4 flex-wrap">
       <div className="flex items-center gap-4">
         <span className="text-5xl leading-none" role="img">{emoji}</span>
         <div>
           <p className="text-4xl font-bold text-foreground leading-none">
             {current ? `${Math.round(current.temperature_2m)}°` : "—"}
           </p>
-          <p className="text-sm text-muted-foreground mt-1">
-            {w?.city ?? "Москва"}
-          </p>
+          <p className="text-sm text-muted-foreground mt-1">{w?.city ?? "Москва"}</p>
         </div>
       </div>
       <div className="flex flex-col items-end gap-1">
         <p className="text-xl font-semibold text-foreground">{timeStr}</p>
         <p className="text-xs text-muted-foreground capitalize">{dateStr}</p>
-        <div className="flex gap-3 text-xs text-muted-foreground mt-1">
-          {current && (
-            <>
-              <span data-testid="weather-humidity">
-                <span style={{ color: "#448aff" }}>💧</span> {current.relative_humidity_2m}%
-              </span>
-              {precipProb !== null && precipProb !== undefined && (
-                <span data-testid="weather-precip">☂️ {precipProb}%</span>
-              )}
-            </>
-          )}
-          <span className={`w-1.5 h-1.5 rounded-full self-center ${current ? "bg-green-400 animate-pulse" : "bg-muted-foreground"}`} />
-        </div>
+        {current && (
+          <div className="flex gap-3 text-xs text-muted-foreground mt-1">
+            <span><span style={{ color: "#448aff" }}>💧</span> {current.relative_humidity_2m}%</span>
+            {current.precipitation_probability != null && (
+              <span>☂️ {current.precipitation_probability}%</span>
+            )}
+            <span className="w-1.5 h-1.5 rounded-full self-center bg-green-400 animate-pulse" />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -75,23 +77,15 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
-  const W = 60;
-  const H = 20;
+  const W = 56, H = 18;
   const pts = values.map((v, i) => {
     const x = (i / (values.length - 1)) * W;
     const y = H - ((v - min) / range) * H;
-    return `${x},${y}`;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
   });
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
-      <polyline
-        points={pts.join(" ")}
-        fill="none"
-        stroke={color}
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <polyline points={pts.join(" ")} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -126,26 +120,28 @@ function DeviceTile({
   const controlDevice = useControlDevice({
     request: { headers: { "x-yandex-token": token } },
   });
+
   const isOn = isDeviceOn(device);
+  const canToggle = hasToggle(device);
+  const isAc = isAcDevice(device);
   const icon = getDeviceIcon(device.type);
-  const isSensor = device.type.includes("sensor");
   const size: TileSize = config?.size ?? "1x1";
   const isPinned = config?.pinned ?? false;
 
-  const tempProp = device.properties?.find((p: any) => p.parameters?.instance === "temperature");
-  const humProp = device.properties?.find((p: any) => p.parameters?.instance === "humidity");
-  const brightnessCap = device.capabilities?.find(
-    (c: any) => c.type === "devices.capabilities.range" && c.parameters?.instance === "brightness"
-  );
+  const readings = getSensorReadings(device);
+  const hasSensors = Object.keys(readings).length > 0;
+  // Non-clickable if: pure sensor device with no toggle, or has sensor readings but no toggle capability
+  const isInteractive = canToggle;
+
+  const acMode = isAc ? getAcMode(device) : undefined;
+  const brightnessCap = getDeviceCapability(device, "devices.capabilities.range", "brightness");
   const brightness = brightnessCap?.state?.value as number | undefined;
 
   const tempHistory: number[] = sensorHistory?.[device.id]?.temperature ?? [];
   const humHistory: number[] = sensorHistory?.[device.id]?.humidity ?? [];
 
   const handleClick = () => {
-    if (editMode) return;
-    const hasToggle = device.capabilities?.find((c: any) => c.type === "devices.capabilities.on_off");
-    if (!hasToggle) return;
+    if (editMode || !isInteractive) return;
     controlDevice.mutate(
       {
         deviceId: device.id,
@@ -164,9 +160,10 @@ function DeviceTile({
 
   return (
     <div
-      className={`relative rounded-2xl p-3 border transition-all duration-300 cursor-pointer select-none overflow-hidden
+      className={`relative rounded-2xl p-3 border transition-all duration-300 overflow-hidden select-none
         ${sizeClasses[size]}
         ${isPinned ? "device-pinned bg-card" : isOn ? "device-on bg-card border-transparent" : "bg-card border-border/50"}
+        ${isInteractive && !editMode ? "cursor-pointer" : "cursor-default"}
         ${editMode ? "cursor-grab active:cursor-grabbing" : ""}
       `}
       onClick={handleClick}
@@ -176,21 +173,19 @@ function DeviceTile({
       onDrop={onDrop}
       data-testid={`tile-device-${device.id}`}
     >
-      {/* Edit mode overlay */}
+      {/* Edit overlay */}
       {editMode && (
-        <div className="absolute inset-0 rounded-2xl bg-background/30 backdrop-blur-[2px] z-10 flex flex-col p-2 gap-1">
+        <div className="absolute inset-0 rounded-2xl bg-background/40 backdrop-blur-[2px] z-10 flex flex-col p-2 gap-1">
           <div className="flex justify-between">
             <button
               onClick={(e) => { e.stopPropagation(); onPin(); }}
               className={`p-1 rounded-md transition-colors ${isPinned ? "text-yellow-400" : "text-muted-foreground hover:text-yellow-400"}`}
-              data-testid={`button-pin-${device.id}`}
             >
               <Pin className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
               className="p-1 rounded-md text-muted-foreground hover:text-destructive transition-colors"
-              data-testid={`button-delete-${device.id}`}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -206,7 +201,6 @@ function DeviceTile({
                       ? "border-primary text-primary bg-primary/20"
                       : "border-border/50 text-muted-foreground hover:border-border"
                   }`}
-                  data-testid={`button-size-${s}-${device.id}`}
                 >
                   {s}
                 </button>
@@ -216,70 +210,76 @@ function DeviceTile({
         </div>
       )}
 
-      {/* Tile content */}
+      {/* Content */}
       <div className="flex items-start justify-between mb-1">
-        <span
-          className={`leading-none ${size === "2x2" ? "text-3xl" : size === "1x2" ? "text-2xl" : "text-xl"}`}
-          role="img"
-        >
+        <span className={`leading-none ${size === "2x2" || size === "1x2" ? "text-2xl" : "text-xl"}`} role="img">
           {icon}
         </span>
-        {!isSensor && (
-          <span
-            className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-              isOn ? "text-green-400 bg-green-500/10" : "text-muted-foreground"
-            }`}
-          >
+        {isInteractive && (
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+            isOn ? "text-green-400 bg-green-500/10" : "text-muted-foreground"
+          }`}>
             {isOn ? "ON" : "OFF"}
           </span>
         )}
+        {isAc && acMode && !isInteractive && (
+          <span className="text-base">{AC_MODE_LABELS[acMode]?.emoji ?? "⚙️"}</span>
+        )}
       </div>
+
       <p className={`font-semibold leading-tight text-foreground truncate ${size === "2x2" ? "text-sm" : "text-xs"}`}>
         {device.name}
       </p>
 
-      {/* Sensor values */}
-      {isSensor && (
+      {/* Sensor readings */}
+      {hasSensors && (
         <div className="mt-1 flex gap-2 flex-wrap items-end">
-          {tempProp?.state?.value !== undefined && (
+          {readings.temperature !== undefined && (
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs font-mono" style={{ color: "#ff5252" }}>
-                {Math.round((tempProp.state.value as number) * 10) / 10}°
+              <span className="text-xs font-mono font-semibold" style={{ color: "#ff5252" }}>
+                {readings.temperature.toFixed(1)}°
               </span>
               {tempHistory.length > 1 && <Sparkline values={tempHistory} color="#ff5252" />}
             </div>
           )}
-          {humProp?.state?.value !== undefined && (
+          {readings.humidity !== undefined && (
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs font-mono" style={{ color: "#448aff" }}>
-                {Math.round(humProp.state.value as number)}%
+              <span className="text-xs font-mono font-semibold" style={{ color: "#448aff" }}>
+                {Math.round(readings.humidity)}%
               </span>
               {humHistory.length > 1 && <Sparkline values={humHistory} color="#448aff" />}
             </div>
           )}
+          {readings.co2 !== undefined && (
+            <span className="text-xs font-mono font-semibold" style={{ color: "#b2ff59" }}>
+              {Math.round(readings.co2)} ppm
+            </span>
+          )}
         </div>
       )}
 
-      {/* Brightness slider */}
-      {brightnessCap && isOn && brightness !== undefined && !editMode && (
+      {/* AC mode info */}
+      {isAc && isOn && acMode && (
+        <p className="text-[10px] text-muted-foreground mt-1">
+          {AC_MODE_LABELS[acMode]?.label ?? acMode}
+        </p>
+      )}
+
+      {/* Brightness */}
+      {brightnessCap && isOn && brightness !== undefined && !editMode && !isAc && (
         <div className="mt-2" onClick={(e) => e.stopPropagation()}>
           <Slider
             value={[brightness]}
             onValueChange={(val) =>
               controlDevice.mutate({
                 deviceId: device.id,
-                data: {
-                  actions: [
-                    { type: "devices.capabilities.range", state: { instance: "brightness", value: val[0] } },
-                  ],
-                },
+                data: { actions: [{ type: "devices.capabilities.range", state: { instance: "brightness", value: val[0] } }] },
               })
             }
             min={0}
             max={100}
             step={1}
             className="w-full"
-            data-testid={`slider-tile-brightness-${device.id}`}
           />
         </div>
       )}
@@ -287,14 +287,70 @@ function DeviceTile({
   );
 }
 
+/* ─── Room Tab ─── */
+function RoomTab({
+  room,
+  isActive,
+  onClick,
+  editMode,
+  onMoveLeft,
+  onMoveRight,
+  canMoveLeft,
+  canMoveRight,
+}: {
+  room: any;
+  isActive: boolean;
+  onClick: () => void;
+  editMode: boolean;
+  onMoveLeft: () => void;
+  onMoveRight: () => void;
+  canMoveLeft: boolean;
+  canMoveRight: boolean;
+}) {
+  return (
+    <div className="relative flex items-center">
+      {editMode && canMoveLeft && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onMoveLeft(); }}
+          className="absolute -left-2 z-10 w-4 h-4 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-primary"
+        >
+          <ChevronLeft className="w-2.5 h-2.5" />
+        </button>
+      )}
+      <button
+        onClick={onClick}
+        className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+          isActive
+            ? "bg-primary text-primary-foreground scale-105"
+            : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
+        } ${editMode ? "pr-5" : ""}`}
+      >
+        {editMode && <GripVertical className="w-3 h-3 inline mr-1 opacity-50" />}
+        {room.name}
+      </button>
+      {editMode && canMoveRight && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onMoveRight(); }}
+          className="absolute -right-2 z-10 w-4 h-4 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-primary"
+        >
+          <ChevronRight className="w-2.5 h-2.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 /* ─── Main User Panel ─── */
 export default function UserPanel() {
+  const params = useParams<{ householdId: string }>();
+  const householdId = params.householdId;
+  const [, navigate] = useLocation();
+
   const { token, setToken, isLoaded } = useYandexToken();
-  const { config, initDeviceConfig, updateTileConfig } = usePanelConfig();
+  const { config, initDeviceConfig, updateTileConfig, roomOrder, swapRoomOrder } = usePanelConfig(householdId);
   const [editMode, setEditMode] = useState(false);
-  const [activeRoom, setActiveRoom] = useState<string | null>(null);
+  const [activeRoomIndex, setActiveRoomIndex] = useState(0);
   const [dragFrom, setDragFrom] = useState<string | null>(null);
-  const tabsRef = useRef<HTMLDivElement>(null);
 
   const userInfoQuery = useGetUserInfo({
     request: { headers: { "x-yandex-token": token ?? "" } },
@@ -304,18 +360,36 @@ export default function UserPanel() {
   const userInfo = userInfoQuery.data;
   const sensorHistory = useSensorHistory(userInfo ?? undefined);
 
-  const rooms = useMemo(() => userInfo?.rooms ?? [], [userInfo]);
+  const allRooms = useMemo(() => userInfo?.rooms ?? [], [userInfo]);
   const allDevices = useMemo(() => userInfo?.devices ?? [], [userInfo]);
 
-  const currentRoom = activeRoom ?? rooms[0]?.id ?? null;
+  // Filter to this household
+  const householdRooms = useMemo(
+    () => allRooms.filter((r: any) => r.household_id === householdId),
+    [allRooms, householdId]
+  );
 
+  // Sort rooms by user-defined order
+  const sortedRooms = useMemo(() => {
+    return [...householdRooms].sort((a, b) => {
+      const oa = roomOrder[a.id] ?? householdRooms.indexOf(a);
+      const ob = roomOrder[b.id] ?? householdRooms.indexOf(b);
+      return oa - ob;
+    });
+  }, [householdRooms, roomOrder]);
+
+  const safeRoomIndex = Math.min(activeRoomIndex, Math.max(0, sortedRooms.length - 1));
+  const currentRoom = sortedRooms[safeRoomIndex] ?? null;
+
+  // Devices for current room
   const roomDevices = useMemo(() => {
-    const room = currentRoom ? rooms.find((r: any) => r.id === currentRoom) : null;
-    if (!room) return allDevices;
+    if (!currentRoom) return [];
     return allDevices.filter(
-      (d: any) => room.devices?.includes(d.id) || d.room_id === room.id
+      (d: any) =>
+        d.household_id === householdId &&
+        (currentRoom.devices?.includes(d.id) || d.room_id === currentRoom.id)
     );
-  }, [currentRoom, rooms, allDevices]);
+  }, [currentRoom, allDevices, householdId]);
 
   const sortedDevices = useMemo(() => {
     const visible = roomDevices.filter((d: any) => !config[d.id]?.hidden);
@@ -334,11 +408,13 @@ export default function UserPanel() {
     [roomDevices, config]
   );
 
-  const scrollTabs = (dir: "left" | "right") => {
-    if (tabsRef.current) {
-      tabsRef.current.scrollBy({ left: dir === "left" ? -120 : 120, behavior: "smooth" });
-    }
-  };
+  const goToPrevRoom = useCallback(() => {
+    setActiveRoomIndex((i) => Math.max(0, i - 1));
+  }, []);
+
+  const goToNextRoom = useCallback(() => {
+    setActiveRoomIndex((i) => Math.min(sortedRooms.length - 1, i + 1));
+  }, [sortedRooms.length]);
 
   const handleDragStart = useCallback((id: string) => setDragFrom(id), []);
   const handleDrop = useCallback(
@@ -355,118 +431,136 @@ export default function UserPanel() {
 
   if (!isLoaded) return null;
 
-  if (!token) {
-    return (
-      <div className="p-4">
-        <TokenForm onSave={setToken} />
-      </div>
-    );
-  }
-
+  // Standalone dark wrapper — no shared header
   return (
-    <div className="flex flex-col min-h-0 pb-16">
-      {/* Weather */}
-      <div className="px-3 pt-3">
-        <WeatherCard />
-      </div>
-
-      {/* Room tabs */}
-      {rooms.length > 0 && (
-        <div className="flex items-center gap-1 px-3 mb-3">
-          <button
-            onClick={() => scrollTabs("left")}
-            className="p-1 text-muted-foreground hover:text-foreground shrink-0"
-            data-testid="button-tabs-left"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <div
-            ref={tabsRef}
-            className="flex gap-1 overflow-x-auto flex-1"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {rooms.map((room: any) => (
-              <button
-                key={room.id}
-                onClick={() => setActiveRoom(room.id)}
-                className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  currentRoom === room.id
-                    ? "bg-primary text-primary-foreground scale-105"
-                    : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
-                }`}
-                data-testid={`tab-room-${room.id}`}
-              >
-                {room.name}
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => scrollTabs("right")}
-            className="p-1 text-muted-foreground hover:text-foreground shrink-0"
-            data-testid="button-tabs-right"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
+    <div className="min-h-[100dvh] w-full flex flex-col bg-background text-foreground dark">
+      {!token ? (
+        <div className="p-4 flex-1">
+          <TokenForm onSave={setToken} />
         </div>
-      )}
-
-      {/* Tile grid */}
-      <div className="px-3">
-        {userInfoQuery.isLoading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 auto-rows-[120px]">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="rounded-2xl" />
-            ))}
+      ) : (
+        <>
+          {/* Weather */}
+          <div className="px-3 pt-3">
+            <WeatherCard />
           </div>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 auto-rows-[120px]">
-            {sortedDevices.map((device: any) => (
-              <DeviceTile
-                key={device.id}
-                device={device}
-                token={token}
-                editMode={editMode}
-                config={config[device.id]}
-                sensorHistory={sensorHistory}
-                onPin={() => updateTileConfig(device.id, { pinned: !config[device.id]?.pinned })}
-                onDelete={() => updateTileConfig(device.id, { hidden: true })}
-                onResize={(size) => updateTileConfig(device.id, { size })}
-                onDragStart={() => handleDragStart(device.id)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => handleDrop(device.id)}
-              />
-            ))}
 
-            {/* Add hidden tiles in edit mode */}
-            {editMode && hiddenDevices.map((device: any) => (
+          {/* Room navigation */}
+          {sortedRooms.length > 0 && (
+            <div className="flex items-center gap-1 px-2 mb-3">
               <button
-                key={`hidden-${device.id}`}
-                onClick={() => updateTileConfig(device.id, { hidden: false })}
-                className="rounded-2xl border border-dashed border-border/50 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
-                data-testid={`button-add-tile-${device.id}`}
+                onClick={goToPrevRoom}
+                disabled={safeRoomIndex === 0}
+                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors shrink-0"
+                data-testid="button-room-prev"
               >
-                <Plus className="w-4 h-4" />
-                <span className="text-[10px] text-center px-2 leading-tight">{device.name}</span>
+                <ChevronLeft className="w-5 h-5" />
               </button>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* Edit mode FAB */}
-      <div className="fixed bottom-4 right-4 z-20">
-        <button
-          onClick={() => setEditMode(!editMode)}
-          className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 ${
-            editMode
-              ? "bg-primary text-primary-foreground scale-110"
-              : "bg-card border border-border text-muted-foreground hover:text-foreground"
-          }`}
-          data-testid="button-edit-mode"
-        >
-          <Edit className="w-5 h-5" />
-        </button>
-      </div>
+              <div className="flex gap-2 overflow-x-auto flex-1 py-1" style={{ scrollbarWidth: "none" }}>
+                {sortedRooms.map((room: any, idx: number) => (
+                  <RoomTab
+                    key={room.id}
+                    room={room}
+                    isActive={safeRoomIndex === idx}
+                    onClick={() => setActiveRoomIndex(idx)}
+                    editMode={editMode}
+                    canMoveLeft={idx > 0}
+                    canMoveRight={idx < sortedRooms.length - 1}
+                    onMoveLeft={() => {
+                      swapRoomOrder(room.id, sortedRooms[idx - 1].id, sortedRooms.map((r: any) => r.id));
+                    }}
+                    onMoveRight={() => {
+                      swapRoomOrder(room.id, sortedRooms[idx + 1].id, sortedRooms.map((r: any) => r.id));
+                    }}
+                  />
+                ))}
+              </div>
+
+              <button
+                onClick={goToNextRoom}
+                disabled={safeRoomIndex === sortedRooms.length - 1}
+                className="p-2 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors shrink-0"
+                data-testid="button-room-next"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            </div>
+          )}
+
+          {/* Room name heading */}
+          {currentRoom && (
+            <div className="px-3 mb-2">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
+                {currentRoom.name}
+              </h2>
+            </div>
+          )}
+
+          {/* Tile grid */}
+          <div className="px-3 pb-20 flex-1">
+            {userInfoQuery.isLoading ? (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 auto-rows-[120px]">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="rounded-2xl" />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 auto-rows-[120px]">
+                {sortedDevices.map((device: any) => (
+                  <DeviceTile
+                    key={device.id}
+                    device={device}
+                    token={token}
+                    editMode={editMode}
+                    config={config[device.id]}
+                    sensorHistory={sensorHistory}
+                    onPin={() => updateTileConfig(device.id, { pinned: !config[device.id]?.pinned })}
+                    onDelete={() => updateTileConfig(device.id, { hidden: true })}
+                    onResize={(size) => updateTileConfig(device.id, { size })}
+                    onDragStart={() => handleDragStart(device.id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => handleDrop(device.id)}
+                  />
+                ))}
+
+                {editMode && hiddenDevices.map((device: any) => (
+                  <button
+                    key={`hidden-${device.id}`}
+                    onClick={() => updateTileConfig(device.id, { hidden: false })}
+                    className="rounded-2xl border border-dashed border-border/50 flex flex-col items-center justify-center gap-1 text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span className="text-[10px] text-center px-2 leading-tight">{device.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom FAB row */}
+          <div className="fixed bottom-4 right-4 z-20 flex gap-2">
+            <button
+              onClick={() => navigate("/")}
+              className="w-10 h-10 rounded-full shadow-lg flex items-center justify-center bg-card border border-border text-muted-foreground hover:text-foreground transition-all"
+              title="Инженерная панель"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 ${
+                editMode
+                  ? "bg-primary text-primary-foreground scale-110"
+                  : "bg-card border border-border text-muted-foreground hover:text-foreground"
+              }`}
+              data-testid="button-edit-mode"
+            >
+              <Edit className="w-5 h-5" />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
