@@ -18,13 +18,18 @@ const queryClient = new QueryClient({
 
 function Router() {
   return (
-    <AppLayout>
-      <Switch>
-        <Route path="/" component={EngineeringPanel} />
-        <Route path="/panel" component={UserPanel} />
-        <Route component={NotFound} />
-      </Switch>
-    </AppLayout>
+    <Switch>
+      {/* User panel is standalone — no shared header */}
+      <Route path="/panel/:householdId" component={UserPanel} />
+      <Route>
+        <AppLayout>
+          <Switch>
+            <Route path="/" component={EngineeringPanel} />
+            <Route component={NotFound} />
+          </Switch>
+        </AppLayout>
+      </Route>
+    </Switch>
   );
 }
 
