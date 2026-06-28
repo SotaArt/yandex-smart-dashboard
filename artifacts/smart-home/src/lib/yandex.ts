@@ -11,6 +11,11 @@ export const DEVICE_ICONS: Record<string, string> = {
   "devices.types.sensor.motion": "🏃",
   "devices.types.sensor.smoke": "🔥",
   "devices.types.sensor.water_leak": "🌊",
+  "devices.types.sensor.vibration": "📳",
+  "devices.types.sensor.button": "🔔",
+  "devices.types.sensor.illumination": "🌤️",
+  "devices.types.sensor.power": "⚡",
+  "devices.types.sensor.gas": "💨",
   "devices.types.humidifier": "💧",
   "devices.types.purifier": "🌬️",
   "devices.types.curtain": "🪟",
@@ -21,6 +26,45 @@ export const DEVICE_ICONS: Record<string, string> = {
   "devices.types.other": "📱",
   "default": "📱",
 };
+
+/** Human-readable Russian label for a device type */
+export const DEVICE_TYPE_LABELS: Record<string, string> = {
+  "devices.types.light": "Освещение",
+  "devices.types.light.dimmable": "Диммер",
+  "devices.types.switch": "Выключатель",
+  "devices.types.socket": "Розетка",
+  "devices.types.thermostat": "Термостат",
+  "devices.types.thermostat.ac": "Кондиционер",
+  "devices.types.sensor.climate": "Климат-сенсор",
+  "devices.types.sensor.open": "Датчик открытия",
+  "devices.types.sensor.presence": "Датчик присутствия",
+  "devices.types.sensor.motion": "Датчик движения",
+  "devices.types.sensor.smoke": "Датчик дыма",
+  "devices.types.sensor.water_leak": "Датчик протечки",
+  "devices.types.sensor.vibration": "Датчик вибрации",
+  "devices.types.sensor.button": "Кнопка",
+  "devices.types.sensor.illumination": "Датчик освещённости",
+  "devices.types.sensor.power": "Датчик мощности",
+  "devices.types.sensor.gas": "Датчик газа",
+  "devices.types.humidifier": "Увлажнитель",
+  "devices.types.purifier": "Очиститель воздуха",
+  "devices.types.curtain": "Штора",
+  "devices.types.vacuum_cleaner": "Пылесос",
+  "devices.types.media_device.tv": "Телевизор",
+  "devices.types.media_device": "Медиаустройство",
+  "devices.types.cooking.kettle": "Чайник",
+  "devices.types.other": "Устройство",
+};
+
+export function getDeviceTypeLabel(type: string): string {
+  if (DEVICE_TYPE_LABELS[type]) return DEVICE_TYPE_LABELS[type];
+  // Try prefix match
+  for (const key of Object.keys(DEVICE_TYPE_LABELS)) {
+    if (type.startsWith(key)) return DEVICE_TYPE_LABELS[key];
+  }
+  // Fallback: last segment of type string
+  return type.split(".").pop() ?? type;
+}
 
 export function getDeviceIcon(type: string) {
   if (DEVICE_ICONS[type]) return DEVICE_ICONS[type];

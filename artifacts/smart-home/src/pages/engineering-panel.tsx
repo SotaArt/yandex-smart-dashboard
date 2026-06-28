@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -13,6 +13,7 @@ import { useYandexToken } from "@/hooks/use-yandex-token";
 import { TokenForm } from "@/components/token-form";
 import {
   getDeviceIcon,
+  getDeviceTypeLabel,
   isDeviceOn,
   hasToggle,
   isAcDevice,
@@ -186,7 +187,17 @@ function AcControls({ device, token }: { device: any; token: string }) {
 }
 
 /* ─── Device Card ─── */
-function DeviceCard({ device, token, hideOffline }: { device: any; token: string; hideOffline: boolean }) {
+function DeviceCard({
+  device,
+  token,
+  hideOffline,
+  onHide,
+}: {
+  device: any;
+  token: string;
+  hideOffline: boolean;
+  onHide?: (id: string) => void;
+}) {
   const queryClient = useQueryClient();
   const controlDevice = useControlDevice({
     request: { headers: { "x-yandex-token": token } },
@@ -222,17 +233,27 @@ function DeviceCard({ device, token, hideOffline }: { device: any; token: string
 
   return (
     <div
-      className={`rounded-xl p-4 border transition-all duration-300 ${
+      className={`group relative rounded-xl p-4 border transition-all duration-300 ${
         isOn ? "device-on bg-card border-transparent" : "bg-card border-border/50"
       }`}
       data-testid={`device-card-${device.id}`}
     >
+      {/* Hide button — appears on hover */}
+      {onHide && (
+        <button
+          onClick={() => onHide(device.id)}
+          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-full bg-muted hover:bg-destructive/20 hover:text-destructive text-muted-foreground flex items-center justify-center text-xs leading-none"
+          title="Скрыть устройство"
+        >
+          ×
+        </button>
+      )}
       <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-2xl flex-shrink-0" role="img">{icon}</span>
           <div className="min-w-0">
             <p className="text-sm font-semibold leading-tight text-foreground truncate">{device.name}</p>
-            <p className="text-[10px] text-muted-foreground truncate">{device.type.split(".").pop()}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{getDeviceTypeLabel(device.type)}</p>
           </div>
         </div>
         {canToggle && (
@@ -281,14 +302,20 @@ function RoomSection({
   devices,
   token,
   hideOffline,
+  hiddenIds,
+  onHide,
 }: {
   room: any;
   devices: any[];
   token: string;
   hideOffline: boolean;
+  hiddenIds: Set<string>;
+  onHide: (id: string) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const roomDevices = devices.filter((d) => d.room_id === room.id);
+  const roomDevices = devices
+    .filter((d) => d.room_id === room.id)
+    .filter((d) => !hiddenIds.has(d.id));
   if (roomDevices.length === 0) return null;
 
   const visibleCount = hideOffline
@@ -310,7 +337,7 @@ function RoomSection({
       {!collapsed && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {roomDevices.map((device) => (
-            <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} />
+            <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} onHide={onHide} />
           ))}
         </div>
       )}
@@ -318,13 +345,42 @@ function RoomSection({
   );
 }
 
+const HIDDEN_ENG_KEY = "hidden_eng_devices_v1";
+
 /* ─── Main ─── */
 export default function EngineeringPanel() {
   const { token, setToken, isLoaded } = useYandexToken();
   const [search, setSearch] = useState("");
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string | null>(null);
   const [hideOffline, setHideOffline] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+  const [hiddenDeviceIds, setHiddenDeviceIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(HIDDEN_ENG_KEY);
+      return saved ? new Set<string>(JSON.parse(saved)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  });
   const [, navigate] = useLocation();
+
+  useEffect(() => {
+    localStorage.setItem(HIDDEN_ENG_KEY, JSON.stringify([...hiddenDeviceIds]));
+  }, [hiddenDeviceIds]);
+
+  const hideDevice = useCallback((id: string) => {
+    setHiddenDeviceIds((prev) => new Set([...prev, id]));
+  }, []);
+
+  const restoreDevice = useCallback((id: string) => {
+    setHiddenDeviceIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const restoreAll = useCallback(() => setHiddenDeviceIds(new Set()), []);
   const queryClient = useQueryClient();
 
   const runScenario = useRunScenario({
@@ -430,6 +486,20 @@ export default function EngineeringPanel() {
               {activeCount} активно
             </Badge>
           )}
+          {hiddenDeviceIds.size > 0 && (
+            <button
+              onClick={() => setShowHidden(!showHidden)}
+              className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+                showHidden
+                  ? "border-amber-500/50 text-amber-400 bg-amber-500/10"
+                  : "border-border/50 text-muted-foreground hover:border-border"
+              }`}
+              title="Скрытые устройства"
+            >
+              <EyeOff className="w-3.5 h-3.5" />
+              Скрыто: {hiddenDeviceIds.size}
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -510,12 +580,53 @@ export default function EngineeringPanel() {
             </div>
           )}
 
+          {/* Hidden devices panel */}
+          {showHidden && hiddenDeviceIds.size > 0 && (
+            <div className="mb-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-amber-400">
+                  Скрытые устройства ({hiddenDeviceIds.size})
+                </h3>
+                <button
+                  onClick={restoreAll}
+                  className="text-xs text-amber-400 hover:text-amber-300 border border-amber-500/40 hover:border-amber-400/60 px-2.5 py-1 rounded-md transition-colors"
+                >
+                  Показать все
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {allDevices
+                  .filter((d: any) => hiddenDeviceIds.has(d.id))
+                  .map((device: any) => (
+                    <div
+                      key={device.id}
+                      className="flex items-center gap-2 bg-card border border-border/50 rounded-lg px-3 py-2"
+                    >
+                      <span className="text-lg">{getDeviceIcon(device.type)}</span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium truncate">{device.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">{getDeviceTypeLabel(device.type)}</p>
+                      </div>
+                      <button
+                        onClick={() => restoreDevice(device.id)}
+                        className="text-xs text-amber-400 hover:text-amber-300 flex-shrink-0 border border-amber-500/30 hover:border-amber-400/50 px-2 py-0.5 rounded transition-colors"
+                      >
+                        ↩ Вернуть
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {search ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 mb-6">
-              {filteredDevices.map((device: any) => (
-                <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} />
-              ))}
-              {filteredDevices.length === 0 && (
+              {filteredDevices
+                .filter((d: any) => !hiddenDeviceIds.has(d.id))
+                .map((device: any) => (
+                  <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} onHide={hideDevice} />
+                ))}
+              {filteredDevices.filter((d: any) => !hiddenDeviceIds.has(d.id)).length === 0 && (
                 <p className="col-span-full text-sm text-muted-foreground py-8 text-center">
                   Устройства не найдены: «{search}»
                 </p>
@@ -530,17 +641,21 @@ export default function EngineeringPanel() {
                   devices={filteredDevices as any[]}
                   token={token}
                   hideOffline={hideOffline}
+                  hiddenIds={hiddenDeviceIds}
+                  onHide={hideDevice}
                 />
               ))}
-              {unroomedDevices.length > 0 && (
+              {unroomedDevices.filter((d: any) => !hiddenDeviceIds.has(d.id)).length > 0 && (
                 <div className="mb-6">
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
                     Прочие
                   </h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-                    {unroomedDevices.map((device: any) => (
-                      <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} />
-                    ))}
+                    {unroomedDevices
+                      .filter((d: any) => !hiddenDeviceIds.has(d.id))
+                      .map((device: any) => (
+                        <DeviceCard key={device.id} device={device} token={token} hideOffline={hideOffline} onHide={hideDevice} />
+                      ))}
                   </div>
                 </div>
               )}
