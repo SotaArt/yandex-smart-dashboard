@@ -25,7 +25,7 @@ import {
 import { TokenForm } from "@/components/token-form";
 import { Slider } from "@/components/ui/slider";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Edit, Pin, X, Plus, ChevronLeft, ChevronRight, Settings, GripVertical } from "lucide-react";
+import { Edit, Pin, X, Plus, ChevronLeft, ChevronRight, Settings, GripVertical, EyeOff, Eye } from "lucide-react";
 
 /* ─── Weather Card ─── */
 function WeatherCard() {
@@ -207,7 +207,7 @@ function RoomSensorBar({
               {humidity !== undefined && (
                 <div>
                   <div className="flex items-end gap-1 leading-none">
-                    <span className="text-3xl font-bold text-sky-400">{humidity}</span>
+                    <span className="text-3xl font-bold text-sky-400">{Math.round(humidity)}</span>
                     <span className="text-lg font-semibold text-sky-400/70 mb-0.5">%</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">Влажн.</p>
@@ -236,7 +236,7 @@ function RoomSensorBar({
               {illumination !== undefined && (
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground w-12">Свет</span>
-                  <span className="text-sm font-bold text-foreground">{illumination} <span className="text-[10px] font-normal text-muted-foreground">лк</span></span>
+                  <span className="text-sm font-bold text-foreground">{illumination.toFixed(1)} <span className="text-[10px] font-normal text-muted-foreground">лк</span></span>
                 </div>
               )}
             </div>
@@ -544,50 +544,65 @@ function RoomTab({
   isActive,
   onClick,
   editMode,
-  onMoveLeft,
-  onMoveRight,
-  canMoveLeft,
-  canMoveRight,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onHide,
+  isDragOver,
 }: {
   room: any;
   isActive: boolean;
   onClick: () => void;
   editMode: boolean;
-  onMoveLeft: () => void;
-  onMoveRight: () => void;
-  canMoveLeft: boolean;
-  canMoveRight: boolean;
+  onDragStart?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: () => void;
+  onHide?: () => void;
+  isDragOver?: boolean;
 }) {
   return (
-    <div className="relative flex items-center">
-      {editMode && canMoveLeft && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onMoveLeft(); }}
-          className="absolute -left-2 z-10 w-4 h-4 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-primary"
-        >
-          <ChevronLeft className="w-2.5 h-2.5" />
-        </button>
-      )}
+    <div
+      className={`relative flex items-center shrink-0 transition-all ${isDragOver ? "scale-105 opacity-70" : ""}`}
+      draggable={editMode}
+      onDragStart={editMode ? onDragStart : undefined}
+      onDragOver={editMode ? (e) => { e.preventDefault(); onDragOver?.(e); } : undefined}
+      onDrop={editMode ? onDrop : undefined}
+    >
       <button
         onClick={onClick}
         className={`shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
           isActive
             ? "bg-primary text-primary-foreground scale-105"
             : "bg-card text-muted-foreground hover:text-foreground hover:bg-accent"
-        } ${editMode ? "pr-5" : ""}`}
+        }`}
       >
-        {editMode && <GripVertical className="w-3 h-3 inline mr-1 opacity-50" />}
+        {editMode && <GripVertical className="w-3 h-3 inline mr-1 opacity-40" />}
         {room.name}
       </button>
-      {editMode && canMoveRight && (
+      {editMode && onHide && (
         <button
-          onClick={(e) => { e.stopPropagation(); onMoveRight(); }}
-          className="absolute -right-2 z-10 w-4 h-4 rounded-full bg-background border border-border flex items-center justify-center text-muted-foreground hover:text-primary"
+          onClick={(e) => { e.stopPropagation(); onHide(); }}
+          className="ml-1 p-1 rounded-md text-muted-foreground hover:text-amber-400 transition-colors"
+          title="Скрыть комнату"
         >
-          <ChevronRight className="w-2.5 h-2.5" />
+          <EyeOff className="w-3 h-3" />
         </button>
       )}
     </div>
+  );
+}
+
+/* ─── Hidden Room Pill (restore button in edit mode) ─── */
+function HiddenRoomPill({ room, onRestore }: { room: any; onRestore: () => void }) {
+  return (
+    <button
+      onClick={onRestore}
+      className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground border border-dashed border-border/40 hover:border-primary/50 hover:text-primary transition-all opacity-50 hover:opacity-100"
+      title="Показать комнату"
+    >
+      <Eye className="w-3 h-3" />
+      {room.name}
+    </button>
   );
 }
 

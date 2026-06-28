@@ -14,11 +14,13 @@ export type PanelConfig = Record<string, TileConfig>;
 export type RoomOrder = Record<string, number>;
 
 export function usePanelConfig(householdId?: string) {
-  const tileKey = householdId ? `panel_config_v3_${householdId}` : "panel_config_v3";
-  const roomKey = householdId ? `room_order_v1_${householdId}` : "room_order_v1";
+  const tileKey      = householdId ? `panel_config_v3_${householdId}`  : "panel_config_v3";
+  const roomKey      = householdId ? `room_order_v1_${householdId}`    : "room_order_v1";
+  const roomHiddenKey = householdId ? `room_hidden_v1_${householdId}`  : "room_hidden_v1";
 
   const [config, setConfigState] = useState<PanelConfig>({});
   const [roomOrder, setRoomOrderState] = useState<RoomOrder>({});
+  const [hiddenRooms, setHiddenRoomsState] = useState<Record<string, boolean>>({});
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
@@ -27,11 +29,13 @@ export function usePanelConfig(householdId?: string) {
       if (saved) setConfigState(JSON.parse(saved));
       const savedRooms = localStorage.getItem(roomKey);
       if (savedRooms) setRoomOrderState(JSON.parse(savedRooms));
+      const savedHidden = localStorage.getItem(roomHiddenKey);
+      if (savedHidden) setHiddenRoomsState(JSON.parse(savedHidden));
     } catch {
       // ignore parse errors
     }
     setIsLoaded(true);
-  }, [tileKey, roomKey]);
+  }, [tileKey, roomKey, roomHiddenKey]);
 
   const setConfig = useCallback(
     (newConfig: PanelConfig | ((prev: PanelConfig) => PanelConfig)) => {
@@ -99,6 +103,17 @@ export function usePanelConfig(householdId?: string) {
     [roomKey]
   );
 
+  const toggleRoomHidden = useCallback(
+    (roomId: string) => {
+      setHiddenRoomsState((prev) => {
+        const next = { ...prev, [roomId]: !prev[roomId] };
+        localStorage.setItem(roomHiddenKey, JSON.stringify(next));
+        return next;
+      });
+    },
+    [roomHiddenKey]
+  );
+
   return {
     config,
     setConfig,
@@ -106,6 +121,8 @@ export function usePanelConfig(householdId?: string) {
     updateTileConfig,
     roomOrder,
     swapRoomOrder,
+    hiddenRooms,
+    toggleRoomHidden,
     isLoaded,
   };
 }
