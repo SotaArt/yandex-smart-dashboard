@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams, useLocation } from "wouter";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -142,12 +142,36 @@ function DeviceTile({
 
   const handleClick = () => {
     if (editMode || !isInteractive) return;
+    const newValue = !isOn;
+    // Optimistic update — flip state in cache immediately, no visible delay
+    queryClient.setQueryData(getGetUserInfoQueryKey(), (old: any) => {
+      if (!old) return old;
+      return {
+        ...old,
+        devices: old.devices.map((d: any) => {
+          if (d.id !== device.id) return d;
+          return {
+            ...d,
+            capabilities: d.capabilities.map((c: any) =>
+              c.type === "devices.capabilities.on_off"
+                ? { ...c, state: { ...(c.state ?? {}), value: newValue } }
+                : c
+            ),
+          };
+        }),
+      };
+    });
     controlDevice.mutate(
       {
         deviceId: device.id,
-        data: { actions: [{ type: "devices.capabilities.on_off", state: { instance: "on", value: !isOn } }] },
+        data: { actions: [{ type: "devices.capabilities.on_off", state: { instance: "on", value: newValue } }] },
       },
-      { onSuccess: () => queryClient.invalidateQueries({ queryKey: getGetUserInfoQueryKey() }) }
+      {
+        onError: () => {
+          // Revert optimistic update on error
+          queryClient.invalidateQueries({ queryKey: getGetUserInfoQueryKey() });
+        },
+      }
     );
   };
 
@@ -349,7 +373,8 @@ export default function UserPanel() {
   const { token, setToken, isLoaded } = useYandexToken();
   const { config, initDeviceConfig, updateTileConfig, roomOrder, swapRoomOrder } = usePanelConfig(householdId);
   const [editMode, setEditMode] = useState(false);
-  const [activeRoomIndex, setActiveRoomIndex] = useState(0);
+  // Track by room ID — survives query refetch reordering rooms in the response
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [dragFrom, setDragFrom] = useState<string | null>(null);
 
   const userInfoQuery = useGetUserInfo({
@@ -378,7 +403,12 @@ export default function UserPanel() {
     });
   }, [householdRooms, roomOrder]);
 
-  const safeRoomIndex = Math.min(activeRoomIndex, Math.max(0, sortedRooms.length - 1));
+  // Resolve current room — stable by ID regardless of sort order changes after refetch
+  const safeRoomIndex = useMemo(() => {
+    if (!activeRoomId) return 0;
+    const idx = sortedRooms.findIndex((r: any) => r.id === activeRoomId);
+    return idx >= 0 ? idx : 0;
+  }, [activeRoomId, sortedRooms]);
   const currentRoom = sortedRooms[safeRoomIndex] ?? null;
 
   // Devices for current room
@@ -391,9 +421,15 @@ export default function UserPanel() {
     );
   }, [currentRoom, allDevices, householdId]);
 
+  // Init tile config for new devices (useEffect, not inside useMemo)
+  const roomDeviceIds = roomDevices.map((d: any) => d.id).join(",");
+  useEffect(() => {
+    roomDevices.forEach((d: any) => { if (!config[d.id]) initDeviceConfig(d.id); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomDeviceIds]);
+
   const sortedDevices = useMemo(() => {
     const visible = roomDevices.filter((d: any) => !config[d.id]?.hidden);
-    visible.forEach((d: any) => { if (!config[d.id]) initDeviceConfig(d.id); });
     return [...visible].sort((a, b) => {
       const ca = config[a.id];
       const cb = config[b.id];
@@ -401,7 +437,7 @@ export default function UserPanel() {
       if (!ca?.pinned && cb?.pinned) return 1;
       return (ca?.order ?? 0) - (cb?.order ?? 0);
     });
-  }, [roomDevices, config, initDeviceConfig]);
+  }, [roomDevices, config]);
 
   const hiddenDevices = useMemo(
     () => roomDevices.filter((d: any) => config[d.id]?.hidden),
@@ -409,12 +445,18 @@ export default function UserPanel() {
   );
 
   const goToPrevRoom = useCallback(() => {
-    setActiveRoomIndex((i) => Math.max(0, i - 1));
-  }, []);
+    setActiveRoomId((id) => {
+      const idx = sortedRooms.findIndex((r: any) => r.id === id) || 0;
+      return sortedRooms[Math.max(0, idx - 1)]?.id ?? id;
+    });
+  }, [sortedRooms]);
 
   const goToNextRoom = useCallback(() => {
-    setActiveRoomIndex((i) => Math.min(sortedRooms.length - 1, i + 1));
-  }, [sortedRooms.length]);
+    setActiveRoomId((id) => {
+      const idx = id ? sortedRooms.findIndex((r: any) => r.id === id) : 0;
+      return sortedRooms[Math.min(sortedRooms.length - 1, idx + 1)]?.id ?? id;
+    });
+  }, [sortedRooms]);
 
   const handleDragStart = useCallback((id: string) => setDragFrom(id), []);
   const handleDrop = useCallback(
@@ -462,8 +504,8 @@ export default function UserPanel() {
                   <RoomTab
                     key={room.id}
                     room={room}
-                    isActive={safeRoomIndex === idx}
-                    onClick={() => setActiveRoomIndex(idx)}
+                    isActive={(activeRoomId ?? sortedRooms[0]?.id) === room.id}
+                    onClick={() => setActiveRoomId(room.id)}
                     editMode={editMode}
                     canMoveLeft={idx > 0}
                     canMoveRight={idx < sortedRooms.length - 1}
