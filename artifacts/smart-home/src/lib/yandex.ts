@@ -119,6 +119,8 @@ export function getSensorReadings(device: any): {
   motion?: boolean;
   open?: boolean;
   presence?: boolean;
+  vibration?: boolean;
+  illumination?: number;
 } {
   const props = device.properties ?? [];
   const get = (instance: string) =>
@@ -135,6 +137,16 @@ export function getSensorReadings(device: any): {
   if (co2 !== undefined && co2 !== null) result.co2 = Number(co2);
   const bat = get("battery_level");
   if (bat !== undefined && bat !== null) result.battery = Number(bat);
+  const motion = get("motion");
+  if (motion !== undefined && motion !== null) result.motion = Boolean(motion);
+  const open = get("open");
+  if (open !== undefined && open !== null) result.open = Boolean(open);
+  const presence = get("presence");
+  if (presence !== undefined && presence !== null) result.presence = Boolean(presence);
+  const vibration = get("vibration");
+  if (vibration !== undefined && vibration !== null) result.vibration = Boolean(vibration);
+  const illumination = get("illumination");
+  if (illumination !== undefined && illumination !== null) result.illumination = Number(illumination);
   return result;
 }
 

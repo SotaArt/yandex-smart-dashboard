@@ -90,6 +90,157 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   );
 }
 
+/* ─── Dual sparkline (temp + humidity on the same canvas) ─── */
+function DualSparkline({ tempValues, humValues }: { tempValues: number[]; humValues: number[] }) {
+  const W = 72, H = 28;
+  const toPoints = (values: number[]) => {
+    if (values.length < 2) return "";
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    return values.map((v, i) => {
+      const x = (i / (values.length - 1)) * W;
+      const y = H - ((v - min) / range) * (H - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+  };
+  const hasSomething = tempValues.length >= 2 || humValues.length >= 2;
+  if (!hasSomething) return null;
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="overflow-visible flex-shrink-0">
+      {tempValues.length >= 2 && (
+        <polyline points={toPoints(tempValues)} fill="none" stroke="#f97316" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+      )}
+      {humValues.length >= 2 && (
+        <polyline points={toPoints(humValues)} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+      )}
+    </svg>
+  );
+}
+
+/* ─── PM quality chip ─── */
+function pmQuality(pm25: number): { label: string; color: string } {
+  if (pm25 <= 12) return { label: `PM ${pm25}`, color: "text-green-400" };
+  if (pm25 <= 35) return { label: `PM ${pm25}`, color: "text-yellow-400" };
+  return { label: `PM ${pm25}`, color: "text-red-400" };
+}
+
+/* ─── Room Sensor Bar ─── */
+function RoomSensorBar({
+  roomDevices,
+  sensorHistory,
+}: {
+  roomDevices: any[];
+  sensorHistory: Record<string, { temperature: number[]; humidity: number[] }>;
+}) {
+  const sensorDevices = roomDevices.filter((d) => d.type.includes("sensor"));
+  if (sensorDevices.length === 0) return null;
+
+  // Aggregate readings: first non-undefined value wins per metric
+  let temperature: number | undefined;
+  let humidity: number | undefined;
+  let pm25: number | undefined;
+  let co2: number | undefined;
+  let openState: boolean | undefined;
+  let presenceState: boolean | undefined;
+  let motionState: boolean | undefined;
+  let vibrationState: boolean | undefined;
+  let illumination: number | undefined;
+  let sparkTempHistory: number[] = [];
+  let sparkHumHistory: number[] = [];
+
+  for (const d of sensorDevices) {
+    const r = getSensorReadings(d);
+    if (temperature === undefined && r.temperature !== undefined) {
+      temperature = r.temperature;
+      sparkTempHistory = sensorHistory[d.id]?.temperature ?? [];
+    }
+    if (humidity === undefined && r.humidity !== undefined) {
+      humidity = r.humidity;
+      if (!sparkHumHistory.length) sparkHumHistory = sensorHistory[d.id]?.humidity ?? [];
+    }
+    if (pm25 === undefined && r.pm25 !== undefined) pm25 = r.pm25;
+    if (co2 === undefined && r.co2 !== undefined) co2 = r.co2;
+    if (openState === undefined && r.open !== undefined) openState = r.open;
+    if (presenceState === undefined && r.presence !== undefined) presenceState = r.presence;
+    if (motionState === undefined && r.motion !== undefined) motionState = r.motion;
+    if (vibrationState === undefined && r.vibration !== undefined) vibrationState = r.vibration;
+    if (illumination === undefined && r.illumination !== undefined) illumination = r.illumination;
+  }
+
+  const hasAnyReading =
+    temperature !== undefined || humidity !== undefined || pm25 !== undefined ||
+    co2 !== undefined || openState !== undefined || presenceState !== undefined ||
+    motionState !== undefined || vibrationState !== undefined || illumination !== undefined;
+
+  if (!hasAnyReading) return null;
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap px-3 mb-2">
+      <div className="flex-1 flex items-center gap-2 flex-wrap min-w-0 rounded-xl bg-card border border-border/40 px-3 py-2">
+        {/* Climate readings */}
+        {temperature !== undefined && (
+          <span className="flex items-center gap-1 text-xs text-foreground font-medium">
+            🌡️ <strong>{temperature.toFixed(1)}°</strong>
+          </span>
+        )}
+        {humidity !== undefined && (
+          <span className="flex items-center gap-1 text-xs text-foreground font-medium">
+            💧 <strong>{humidity}%</strong>
+          </span>
+        )}
+        {pm25 !== undefined && (() => { const q = pmQuality(pm25!); return (
+          <span className={`text-xs font-medium ${q.color}`}>🌫️ {q.label}</span>
+        ); })()}
+        {co2 !== undefined && (
+          <span className={`text-xs font-medium ${co2 > 1000 ? "text-yellow-400" : co2 > 1500 ? "text-red-400" : "text-muted-foreground"}`}>
+            CO₂ {co2}
+          </span>
+        )}
+        {illumination !== undefined && (
+          <span className="text-xs text-muted-foreground">☀️ {illumination} лк</span>
+        )}
+
+        {/* Separator dot if both climate and boolean readings */}
+        {(temperature !== undefined || humidity !== undefined || pm25 !== undefined) &&
+         (openState !== undefined || presenceState !== undefined || motionState !== undefined || vibrationState !== undefined) && (
+          <span className="w-1 h-1 rounded-full bg-border flex-shrink-0" />
+        )}
+
+        {/* Boolean status readings */}
+        {openState !== undefined && (
+          <span className={`text-xs ${openState ? "text-amber-400" : "text-muted-foreground"}`}>
+            {openState ? "🚪 Открыта" : "🚪 Закрыта"}
+          </span>
+        )}
+        {presenceState !== undefined && (
+          <span className={`text-xs ${presenceState ? "text-blue-400" : "text-muted-foreground"}`}>
+            {presenceState ? "👤 Есть" : "👤 Нет"}
+          </span>
+        )}
+        {motionState !== undefined && (
+          <span className={`text-xs ${motionState ? "text-purple-400" : "text-muted-foreground"}`}>
+            {motionState ? "🏃 Движение" : "🏃 Покой"}
+          </span>
+        )}
+        {vibrationState !== undefined && (
+          <span className={`text-xs ${vibrationState ? "text-red-400" : "text-muted-foreground"}`}>
+            {vibrationState ? "📳 Вибрация!" : "📳 Тихо"}
+          </span>
+        )}
+
+        {/* Trend sparklines (temperature orange, humidity blue) */}
+        {(sparkTempHistory.length >= 2 || sparkHumHistory.length >= 2) && (
+          <>
+            <span className="w-1 h-1 rounded-full bg-border flex-shrink-0 ml-auto" />
+            <DualSparkline tempValues={sparkTempHistory} humValues={sparkHumHistory} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Device Tile ─── */
 function DeviceTile({
   device,
@@ -428,8 +579,11 @@ export default function UserPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomDeviceIds]);
 
+  // Pure sensor = type contains "sensor" AND has no toggle — shown in sensor bar, not as tiles
+  const isSensorOnly = (d: any) => d.type.includes("sensor") && !hasToggle(d);
+
   const sortedDevices = useMemo(() => {
-    const visible = roomDevices.filter((d: any) => !config[d.id]?.hidden);
+    const visible = roomDevices.filter((d: any) => !config[d.id]?.hidden && !isSensorOnly(d));
     return [...visible].sort((a, b) => {
       const ca = config[a.id];
       const cb = config[b.id];
@@ -440,7 +594,7 @@ export default function UserPanel() {
   }, [roomDevices, config]);
 
   const hiddenDevices = useMemo(
-    () => roomDevices.filter((d: any) => config[d.id]?.hidden),
+    () => roomDevices.filter((d: any) => config[d.id]?.hidden && !isSensorOnly(d)),
     [roomDevices, config]
   );
 
@@ -530,13 +684,9 @@ export default function UserPanel() {
             </div>
           )}
 
-          {/* Room name heading */}
+          {/* Room sensor status bar — replaces duplicate room name */}
           {currentRoom && (
-            <div className="px-3 mb-2">
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-                {currentRoom.name}
-              </h2>
-            </div>
+            <RoomSensorBar roomDevices={roomDevices} sensorHistory={sensorHistory} />
           )}
 
           {/* Tile grid */}
