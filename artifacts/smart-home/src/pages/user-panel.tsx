@@ -91,8 +91,8 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
 }
 
 /* ─── Dual sparkline (temp + humidity on the same canvas) ─── */
-function DualSparkline({ tempValues, humValues }: { tempValues: number[]; humValues: number[] }) {
-  const W = 72, H = 28;
+function DualSparkline({ tempValues, humValues, width = 96, height = 40 }: { tempValues: number[]; humValues: number[]; width?: number; height?: number }) {
+  const W = width, H = height;
   const toPoints = (values: number[]) => {
     if (values.length < 2) return "";
     const min = Math.min(...values);
@@ -100,29 +100,34 @@ function DualSparkline({ tempValues, humValues }: { tempValues: number[]; humVal
     const range = max - min || 1;
     return values.map((v, i) => {
       const x = (i / (values.length - 1)) * W;
-      const y = H - ((v - min) / range) * (H - 4) - 2;
+      const y = H - ((v - min) / range) * (H - 6) - 3;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(" ");
   };
-  const hasSomething = tempValues.length >= 2 || humValues.length >= 2;
-  if (!hasSomething) return null;
+  if (tempValues.length < 2 && humValues.length < 2) return null;
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="overflow-visible flex-shrink-0">
       {tempValues.length >= 2 && (
-        <polyline points={toPoints(tempValues)} fill="none" stroke="#f97316" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+        <polyline points={toPoints(tempValues)} fill="none" stroke="#f97316" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
       )}
       {humValues.length >= 2 && (
-        <polyline points={toPoints(humValues)} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.8" />
+        <polyline points={toPoints(humValues)} fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.9" />
       )}
     </svg>
   );
 }
 
-/* ─── PM quality chip ─── */
-function pmQuality(pm25: number): { label: string; color: string } {
-  if (pm25 <= 12) return { label: `PM ${pm25}`, color: "text-green-400" };
-  if (pm25 <= 35) return { label: `PM ${pm25}`, color: "text-yellow-400" };
-  return { label: `PM ${pm25}`, color: "text-red-400" };
+/* ─── PM quality helpers ─── */
+function pmQuality(pm25: number) {
+  if (pm25 <= 12) return { label: "Хорошо", badge: "bg-green-500/15 text-green-400 border-green-500/25" };
+  if (pm25 <= 35) return { label: "Норма",  badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25" };
+  return { label: "Плохо", badge: "bg-red-500/15 text-red-400 border-red-500/25" };
+}
+
+function co2Quality(co2: number) {
+  if (co2 <= 800)  return { label: "Свежий", badge: "bg-green-500/15 text-green-400 border-green-500/25" };
+  if (co2 <= 1200) return { label: "Норма",  badge: "bg-yellow-500/15 text-yellow-400 border-yellow-500/25" };
+  return { label: "Душно", badge: "bg-red-500/15 text-red-400 border-red-500/25" };
 }
 
 /* ─── Room Sensor Bar ─── */
@@ -133,10 +138,14 @@ function RoomSensorBar({
   roomDevices: any[];
   sensorHistory: Record<string, { temperature: number[]; humidity: number[] }>;
 }) {
-  const sensorDevices = roomDevices.filter((d) => d.type.includes("sensor"));
-  if (sensorDevices.length === 0) return null;
+  // Collect from all devices that carry sensor readings (including IR remotes w/ temp+hum)
+  const sensorSources = roomDevices.filter((d) => {
+    const r = getSensorReadings(d);
+    return Object.keys(r).length > 0 || d.type.includes("sensor");
+  });
+  if (sensorSources.length === 0) return null;
 
-  // Aggregate readings: first non-undefined value wins per metric
+  // Aggregate: first non-undefined value wins per metric
   let temperature: number | undefined;
   let humidity: number | undefined;
   let pm25: number | undefined;
@@ -149,7 +158,7 @@ function RoomSensorBar({
   let sparkTempHistory: number[] = [];
   let sparkHumHistory: number[] = [];
 
-  for (const d of sensorDevices) {
+  for (const d of sensorSources) {
     const r = getSensorReadings(d);
     if (temperature === undefined && r.temperature !== undefined) {
       temperature = r.temperature;
@@ -168,74 +177,141 @@ function RoomSensorBar({
     if (illumination === undefined && r.illumination !== undefined) illumination = r.illumination;
   }
 
-  const hasAnyReading =
-    temperature !== undefined || humidity !== undefined || pm25 !== undefined ||
-    co2 !== undefined || openState !== undefined || presenceState !== undefined ||
-    motionState !== undefined || vibrationState !== undefined || illumination !== undefined;
+  const hasClimate = temperature !== undefined || humidity !== undefined;
+  const hasAir     = pm25 !== undefined || co2 !== undefined || illumination !== undefined;
+  const hasStatus  = openState !== undefined || presenceState !== undefined || motionState !== undefined || vibrationState !== undefined;
+  const hasChart   = sparkTempHistory.length >= 2 || sparkHumHistory.length >= 2;
 
-  if (!hasAnyReading) return null;
+  if (!hasClimate && !hasAir && !hasStatus) return null;
+
+  const pm = pm25 !== undefined ? pmQuality(pm25) : null;
+  const co = co2 !== undefined ? co2Quality(co2) : null;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap px-3 mb-2">
-      <div className="flex-1 flex items-center gap-2 flex-wrap min-w-0 rounded-xl bg-card border border-border/40 px-3 py-2">
-        {/* Climate readings */}
-        {temperature !== undefined && (
-          <span className="flex items-center gap-1 text-xs text-foreground font-medium">
-            🌡️ <strong>{temperature.toFixed(1)}°</strong>
-          </span>
-        )}
-        {humidity !== undefined && (
-          <span className="flex items-center gap-1 text-xs text-foreground font-medium">
-            💧 <strong>{humidity}%</strong>
-          </span>
-        )}
-        {pm25 !== undefined && (() => { const q = pmQuality(pm25!); return (
-          <span className={`text-xs font-medium ${q.color}`}>🌫️ {q.label}</span>
-        ); })()}
-        {co2 !== undefined && (
-          <span className={`text-xs font-medium ${co2 > 1000 ? "text-yellow-400" : co2 > 1500 ? "text-red-400" : "text-muted-foreground"}`}>
-            CO₂ {co2}
-          </span>
-        )}
-        {illumination !== undefined && (
-          <span className="text-xs text-muted-foreground">☀️ {illumination} лк</span>
-        )}
+    <div className="px-3 mb-3">
+      <div className="rounded-2xl bg-card border border-border/50 overflow-hidden">
+        <div className="flex items-stretch divide-x divide-border/40">
 
-        {/* Separator dot if both climate and boolean readings */}
-        {(temperature !== undefined || humidity !== undefined || pm25 !== undefined) &&
-         (openState !== undefined || presenceState !== undefined || motionState !== undefined || vibrationState !== undefined) && (
-          <span className="w-1 h-1 rounded-full bg-border flex-shrink-0" />
-        )}
+          {/* ── Climate: temperature + humidity ── */}
+          {hasClimate && (
+            <div className="flex items-center gap-5 px-5 py-4 flex-shrink-0">
+              {temperature !== undefined && (
+                <div>
+                  <div className="flex items-end gap-1 leading-none">
+                    <span className="text-3xl font-bold text-foreground">{temperature.toFixed(1)}</span>
+                    <span className="text-lg font-semibold text-muted-foreground mb-0.5">°C</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">Темп.</p>
+                </div>
+              )}
+              {humidity !== undefined && (
+                <div>
+                  <div className="flex items-end gap-1 leading-none">
+                    <span className="text-3xl font-bold text-sky-400">{humidity}</span>
+                    <span className="text-lg font-semibold text-sky-400/70 mb-0.5">%</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">Влажн.</p>
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Boolean status readings */}
-        {openState !== undefined && (
-          <span className={`text-xs ${openState ? "text-amber-400" : "text-muted-foreground"}`}>
-            {openState ? "🚪 Открыта" : "🚪 Закрыта"}
-          </span>
-        )}
-        {presenceState !== undefined && (
-          <span className={`text-xs ${presenceState ? "text-blue-400" : "text-muted-foreground"}`}>
-            {presenceState ? "👤 Есть" : "👤 Нет"}
-          </span>
-        )}
-        {motionState !== undefined && (
-          <span className={`text-xs ${motionState ? "text-purple-400" : "text-muted-foreground"}`}>
-            {motionState ? "🏃 Движение" : "🏃 Покой"}
-          </span>
-        )}
-        {vibrationState !== undefined && (
-          <span className={`text-xs ${vibrationState ? "text-red-400" : "text-muted-foreground"}`}>
-            {vibrationState ? "📳 Вибрация!" : "📳 Тихо"}
-          </span>
-        )}
+          {/* ── Air quality: PM + CO₂ + illumination ── */}
+          {hasAir && (
+            <div className="flex flex-col justify-center gap-2 px-5 py-4 flex-shrink-0">
+              {pm25 !== undefined && pm && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-12">PM 2.5</span>
+                  <span className="text-sm font-bold text-foreground">{pm25}</span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${pm.badge}`}>{pm.label}</span>
+                </div>
+              )}
+              {co2 !== undefined && co && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-12">CO₂</span>
+                  <span className="text-sm font-bold text-foreground">{co2} <span className="text-[10px] font-normal text-muted-foreground">ppm</span></span>
+                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${co.badge}`}>{co.label}</span>
+                </div>
+              )}
+              {illumination !== undefined && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground w-12">Свет</span>
+                  <span className="text-sm font-bold text-foreground">{illumination} <span className="text-[10px] font-normal text-muted-foreground">лк</span></span>
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Trend sparklines (temperature orange, humidity blue) */}
-        {(sparkTempHistory.length >= 2 || sparkHumHistory.length >= 2) && (
-          <>
-            <span className="w-1 h-1 rounded-full bg-border flex-shrink-0 ml-auto" />
-            <DualSparkline tempValues={sparkTempHistory} humValues={sparkHumHistory} />
-          </>
-        )}
+          {/* ── Boolean status sensors ── */}
+          {hasStatus && (
+            <div className="flex flex-wrap items-center gap-2 px-5 py-4 flex-1 min-w-0">
+              {openState !== undefined && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${openState ? "bg-amber-500/10 border-amber-500/30" : "bg-muted/30 border-border/40"}`}>
+                  <span className="text-base leading-none">🚪</span>
+                  <div>
+                    <p className={`text-xs font-semibold leading-none ${openState ? "text-amber-400" : "text-foreground"}`}>
+                      {openState ? "Открыта" : "Закрыта"}
+                    </p>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">Дверь / окно</p>
+                  </div>
+                </div>
+              )}
+              {presenceState !== undefined && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${presenceState ? "bg-blue-500/10 border-blue-500/30" : "bg-muted/30 border-border/40"}`}>
+                  <span className="text-base leading-none">👤</span>
+                  <div>
+                    <p className={`text-xs font-semibold leading-none ${presenceState ? "text-blue-400" : "text-foreground"}`}>
+                      {presenceState ? "Есть" : "Никого"}
+                    </p>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">Присутствие</p>
+                  </div>
+                </div>
+              )}
+              {motionState !== undefined && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${motionState ? "bg-purple-500/10 border-purple-500/30" : "bg-muted/30 border-border/40"}`}>
+                  <span className="text-base leading-none">🏃</span>
+                  <div>
+                    <p className={`text-xs font-semibold leading-none ${motionState ? "text-purple-400" : "text-foreground"}`}>
+                      {motionState ? "Движение" : "Покой"}
+                    </p>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">Движение</p>
+                  </div>
+                </div>
+              )}
+              {vibrationState !== undefined && (
+                <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${vibrationState ? "bg-red-500/10 border-red-500/30" : "bg-muted/30 border-border/40"}`}>
+                  <span className="text-base leading-none">📳</span>
+                  <div>
+                    <p className={`text-xs font-semibold leading-none ${vibrationState ? "text-red-400" : "text-foreground"}`}>
+                      {vibrationState ? "Вибрация!" : "Тихо"}
+                    </p>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">Вибрация</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Trend chart ── */}
+          {hasChart && (
+            <div className="flex flex-col items-center justify-center gap-2 px-5 py-4 flex-shrink-0">
+              <DualSparkline tempValues={sparkTempHistory} humValues={sparkHumHistory} width={96} height={40} />
+              <div className="flex items-center gap-3 text-[9px] text-muted-foreground">
+                {sparkTempHistory.length >= 2 && (
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-orange-400 rounded inline-block" />Темп.
+                  </span>
+                )}
+                {sparkHumHistory.length >= 2 && (
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-0.5 bg-sky-400 rounded inline-block" />Влажн.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+        </div>
       </div>
     </div>
   );
@@ -579,8 +655,10 @@ export default function UserPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomDeviceIds]);
 
-  // Pure sensor = type contains "sensor" AND has no toggle — shown in sensor bar, not as tiles
-  const isSensorOnly = (d: any) => d.type.includes("sensor") && !hasToggle(d);
+  // Sensor-only = no toggle AND not AC AND (type is sensor OR has any sensor readings)
+  // This catches: sensor devices, IR remotes with temp/humidity, vibration sensors, etc.
+  const isSensorOnly = (d: any) =>
+    !hasToggle(d) && !isAcDevice(d) && (d.type.includes("sensor") || hasSensorReadings(d));
 
   const sortedDevices = useMemo(() => {
     const visible = roomDevices.filter((d: any) => !config[d.id]?.hidden && !isSensorOnly(d));
